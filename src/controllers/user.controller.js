@@ -1,8 +1,9 @@
 import { asyncHandler } from "../utils/asyncHandler.js";
-import {ApiError} from "../utils/apiError.js";
+import { ApiError } from "../utils/apiError.js";
 import { User } from "../models/user.model.js";
 import { uploadOnCloudinary } from "../utils/cloudinary.js";
 import { ApiResponse } from "../utils/apiResponse.js";
+import jwt from "jsonwebtoken";
 
 const registerUser = asyncHandler(async (req, res) => {
     // res.status(200).json({
@@ -17,7 +18,8 @@ const registerUser = asyncHandler(async (req, res) => {
     // }
     // validation
     if (
-        [fullName, email, username, password].some((field) =>(!field || field.trim() === "")
+        [fullName, email, username, password].some(
+            (field) => !field || field.trim() === ""
         )
     ) {
         throw new ApiError(400, "All fields are required.");
@@ -36,18 +38,18 @@ const registerUser = asyncHandler(async (req, res) => {
         req.files &&
         Array.isArray(req.files.coverImage) &&
         req.files.coverImage.length > 0
-    ){
-		coverLocalPath = req.files.coverImage[0].path
-	}
+    ) {
+        coverLocalPath = req.files.coverImage[0].path;
+    }
 
     if (!avatarLocalPath) {
-        throw new ApiError(400, `Avatar required.`); 
+        throw new ApiError(400, `Avatar required.`);
     }
 
     const avatar = await uploadOnCloudinary(avatarLocalPath);
-    const coverImage = await uploadOnCloudinary(coverLocalPath);                          
- 
-    if (!avatar) { 
+    const coverImage = await uploadOnCloudinary(coverLocalPath);
+
+    if (!avatar) {
         throw new ApiError(400, "Avatar not uploaded on cloudinary.");
     }
 
@@ -60,12 +62,11 @@ const registerUser = asyncHandler(async (req, res) => {
         avatar: avatar.url,
         coverImage: coverImage?.url || "",
     });
- 
+
     // checking if the user was created
     const userCreated = await User.findById(user._id).select(
         "-password -refreshToken"
     );
-	console.log(User.collection.name)
 
     if (!userCreated) {
         throw new ApiError(500, "Error ocurred during creating the User.");
@@ -100,7 +101,7 @@ const loginUser = asyncHandler(async (req, res) => {
     // get the data
     const { email, username, password } = req.body;
 
-    if (!email && !username) {
+    if (!(email || username)) {
         throw new ApiError(400, "Provide email or a username.");
     }
     if (!password) {
@@ -183,4 +184,54 @@ const logoutUser = asyncHandler(async (req, res) => {
         .json(new ApiResponse(200, {}, "User Logged Out."));
 });
 
-export { registerUser, loginUser, logoutUser };
+const refreshAccessToken = asyncHandler(async (req, res) => {
+    const incomingRefreshToken =
+        req.cookies.refreshToken || req.body.refreshToken;
+    if (!incomingRefreshToken) {
+        throw new ApiError(401, "Unauthorized Request");
+    }
+
+    try {
+        const decodedToken = jwt.verify(
+            incomingRefreshToken,
+            process.env.REFRESH_TOKEN_SECRET
+        );
+
+        const user = await User.findById(decodedToken?._id);
+        if (!user) {
+            throw new ApiError(401, "Invalid Refresh Token.");
+        }
+
+        if (incomingRefreshToken !== user?.refreshToken) {
+            throw new ApiError(401, "Refresh Token is expired or used.");
+        }
+
+        const options = {
+            httpOnly: true,
+            secure: true,
+        };
+
+        const { accessToken, newRefreshToken } =
+            await generateAccessAndRefreshToken(user._id);
+
+        return res
+            .status(200)
+            .cookie("accessToken", accessToken, options)
+            .cookie("refreshToken", newRefreshToken, options)
+            .json(
+                new ApiResponse(
+                    200,
+                    {
+                        accessToken,
+                        refreshToken: newRefreshToken,
+                    },
+                    "Access Token refreshed."
+                )
+            );
+    } catch (error) {
+        console.error(error);
+        throw new ApiError(401, "Could not refresh the access tokens.");
+    }
+});
+
+export { registerUser, loginUser, logoutUser, refreshAccessToken };
