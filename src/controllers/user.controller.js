@@ -9,6 +9,25 @@ import { ApiResponse } from "../utils/apiResponse.js";
 import jwt from "jsonwebtoken";
 import mongoose from "mongoose";
 
+const generateAccessAndRefreshToken = async (id) => {
+    try {
+        const user = await User.findById(id);
+        if (!user) {
+            throw new ApiError(400, "User not found to generate tokens.");
+        }
+
+        const accessToken = await user.generateAccessToken();
+        const refreshToken = await user.generateRefreshToken();
+
+        user.refreshToken = refreshToken;
+        await user.save({ validateBeforeSave: false });
+
+        return { accessToken, refreshToken };
+    } catch (error) {
+        throw new ApiError(500, "Could not generate Access and Refresh Token");
+    }
+};
+
 const registerUser = asyncHandler(async (req, res) => {
     // res.status(200).json({
     //     message: "ok",
@@ -82,25 +101,6 @@ const registerUser = asyncHandler(async (req, res) => {
         .json(new ApiResponse(200, userCreated, "User Created Successfully."));
 });
 
-const generateAccessAndRefreshToken = async (id) => {
-    try {
-        const user = await User.findById(id);
-        if (!user) {
-            throw new ApiError(400, "User not found to generate tokens.");
-        }
-
-        const accessToken = await user.generateAccessToken();
-        const refreshToken = await user.generateRefreshToken();
-
-        user.refreshToken = refreshToken;
-        await user.save({ validateBeforeSave: false });
-
-        return { accessToken, refreshToken };
-    } catch (error) {
-        throw new ApiError(500, "Could not generate Access and Refresh Token");
-    }
-};
-
 const loginUser = asyncHandler(async (req, res) => {
     // get the data
     const { email, username, password } = req.body;
@@ -167,8 +167,8 @@ const logoutUser = asyncHandler(async (req, res) => {
     await User.findByIdAndUpdate(
         userId,
         {
-            $set: {
-                refreshToken: undefined,
+            $unset: {
+                refreshToken: 1,// this removes the field 
             },
         },
         {
@@ -455,20 +455,20 @@ const getUserChannelProfile = asyncHandler(async (req, res) => {
 
 const getWatchHistory = asyncHandler(async (req, res) => {
     const user = await User.aggregate([
-		// firstly get the user
+        // firstly get the user
         {
             $match: {
                 _id: new mongoose.Types.ObjectId(req.user._id),
             },
         },
         {
-			// access the current user watchHistory(which is ids of videos) as:watchHistory this replaces the ids with the array of full video document
+            // access the current user watchHistory(which is ids of videos) as:watchHistory this replaces the ids with the array of full video document
             $lookup: {
                 from: "videos",
                 localField: "watchHistory",
                 foreignField: "_id",
                 as: "watchHistory",
-				// this runs on the new watchHistory array to find the owner for that video
+                // this runs on the new watchHistory array to find the owner for that video
                 pipeline: [
                     {
                         $lookup: {
@@ -476,7 +476,7 @@ const getWatchHistory = asyncHandler(async (req, res) => {
                             localField: "owner",
                             foreignField: "_id",
                             as: "owner",
-							// this filters the result to contain only specified values
+                            // this filters the result to contain only specified values
                             pipeline: [
                                 {
                                     $project: {
@@ -489,7 +489,7 @@ const getWatchHistory = asyncHandler(async (req, res) => {
                         },
                     },
                     {
-						// this converts the array of objects to object as this was recieved as a array
+                        // this converts the array of objects to object as this was recieved as a array
                         $addFields: {
                             owner: {
                                 $first: "$owner",
@@ -501,7 +501,15 @@ const getWatchHistory = asyncHandler(async (req, res) => {
         },
     ]);
 
-	return res.status(200).json(new ApiResponse(200,user[0].watchHistory,"Watch Hisory fetched successfully."))
+    return res
+        .status(200)
+        .json(
+            new ApiResponse(
+                200,
+                user[0].watchHistory,
+                "Watch Hisory fetched successfully."
+            )
+        );
 });
 
 export {
@@ -515,5 +523,5 @@ export {
     updateUserAvatar,
     updateUserCoverImage,
     getUserChannelProfile,
-	getWatchHistory
+    getWatchHistory,
 };
