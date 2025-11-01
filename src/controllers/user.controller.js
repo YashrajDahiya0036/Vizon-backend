@@ -160,7 +160,7 @@ const loginUser = asyncHandler(async (req, res) => {
 
 const logoutUser = asyncHandler(async (req, res) => {
     const userId = req.user._id;
-    User.findByIdAndUpdate(
+    await User.findByIdAndUpdate(
         userId,
         {
             $set: {
@@ -266,7 +266,7 @@ const updateAccountDetails = asyncHandler(async (req, res) => {
         throw new ApiError(400, "All field are required.");
     }
 
-    const user = User.findByIdAndUpdate(
+    const user = await User.findByIdAndUpdate(
         req.user?._id,
         {
             $set: {
