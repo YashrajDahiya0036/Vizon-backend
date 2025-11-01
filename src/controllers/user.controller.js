@@ -1,7 +1,10 @@
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
 import { User } from "../models/user.model.js";
-import { uploadOnCloudinary } from "../utils/cloudinary.js";
+import {
+    deleteFromCloudinary,
+    uploadOnCloudinary,
+} from "../utils/cloudinary.js";
 import { ApiResponse } from "../utils/apiResponse.js";
 import jwt from "jsonwebtoken";
 
@@ -295,18 +298,25 @@ const updateUserAvatar = asyncHandler(async (req, res) => {
         throw new ApiError("Avatar was not uploded on Cloudinary.");
     }
 
-    const user = await User.findByIdAndUpdate(
-        req.user?._id,
-        {
-            $set: {
-                avatar: avatar.url,
-            },
-        },
-        { new: true }
-    ).select("-password");
+    const user = await User.findById(req.user?._id);
+    if (!user) {
+        throw new ApiError(400, "User not found.");
+    }
 
+    const oldAvatarUrl = user.avatar;
+
+    user.avatar = avatar.url;
+    await user.save({ validateBeforeSave: false });
+
+    if (oldAvatarUrl) {
+        deleteFromCloudinary(oldAvatarUrl);
+    }
+
+    const updatedUser = await User.findById(user._id).select(
+        "-password -refreshToken"
+    );
     res.status(200).json(
-        new ApiResponse(200, user, "Avatar updated Successfully.")
+        new ApiResponse(200, updatedUser, "Avatar updated Successfully.")
     );
 });
 
@@ -314,28 +324,41 @@ const updateUserCoverImage = asyncHandler(async (req, res) => {
     const coverImageLocalPath = req.file?.path;
 
     if (!coverImageLocalPath) {
-        throw new ApiError(400, "Cover Image File not found.");
+        throw new ApiError(400, "Cover image file not found.");
     }
 
     const coverImage = await uploadOnCloudinary(coverImageLocalPath);
-
-    if (!coverImage.url) {
-        throw new ApiError("Cover Image was not uploded on Cloudinary.");
+    if (!coverImage?.url) {
+        throw new ApiError(400, "Cover image was not uploaded to Cloudinary.");
     }
 
-    const user = await User.findByIdAndUpdate(
-        req.user?._id,
-        {
-            $set: {
-                coverImage: coverImage.url,
-            },
-        },
-        { new: true }
-    ).select("-password");
+    const user = await User.findById(req.user?._id);
+    if (!user) {
+        throw new ApiError(404, "User not found.");
+    }
 
-    res.status(200).json(
-        new ApiResponse(200, user, "Cover Image updated Successfully.")
+    const oldCoverImageUrl = user.coverImage;
+
+    user.coverImage = coverImage.url;
+    await user.save({ validateBeforeSave: false });
+
+    if (oldCoverImageUrl) {
+        deleteFromCloudinary(oldCoverImageUrl);
+    }
+
+    const updatedUser = await User.findById(user._id).select(
+        "-password -refreshToken"
     );
+
+    return res
+        .status(200)
+        .json(
+            new ApiResponse(
+                200,
+                updatedUser,
+                "✅ Cover image updated successfully."
+            )
+        );
 });
 
 export {
